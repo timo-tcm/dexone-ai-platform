@@ -1,112 +1,180 @@
-import type { Email, MailAccount, MailFolder, MailAgentPipeline } from '@/types/index';
+// =============================================================================
+// DEXONE — data/mailops.ts
+// Reemplaza los datos mock por llamadas reales a dexoneMailOps CF
+// =============================================================================
+
+import type {
+  Email, MailOpsStats, MailOpsFilters,
+  MailAccount, MailFolder, MailView
+} from '@/types/mailops';
+
+// ─── URL base de la Cloud Function ───────────────────────────────────────────
+const CF_BASE = process.env.NEXT_PUBLIC_DEXONE_CF_URL
+  || 'https://module-mail-ops-985946114156.us-central1.run.app';
+
+const MAILOPS_URL = `${CF_BASE.replace(/\/$/, '')}/dexoneMailOps`;
+
+// =============================================================================
+// API CLIENT
+// =============================================================================
+
+async function fetchMailOps<T>(path: string, params?: Record<string, string>): Promise<T> {
+  const url = new URL(path.startsWith('http') ? path : `${MAILOPS_URL}${path}`);
+
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+    });
+  }
+
+  const res = await fetch(url.toString(), {
+    method:  'GET',
+    headers: { 'Content-Type': 'application/json' },
+    cache:   'no-store',   // Siempre datos frescos
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+
+  return res.json() as Promise<T>;
+}
+
+// =============================================================================
+// FUNCIONES PRINCIPALES
+// =============================================================================
+
+// Obtener lista de correos con filtros opcionales
+export async function getEmails(filters?: MailOpsFilters): Promise<Email[]> {
+  const params: Record<string, string> = {};
+  if (filters?.tipo)            params.tipo            = filters.tipo;
+  if (filters?.patron)          params.patron          = String(filters.patron);
+  if (filters?.prioridad)       params.prioridad       = filters.prioridad;
+  if (filters?.es_patron_nuevo) params.es_patron_nuevo = 'true';
+  if (filters?.holds)           params.holds           = 'true';
+  if (filters?.requiere_humano) params.requiere_humano = 'true';
+  if (filters?.limit)           params.limit           = String(filters.limit);
+
+  const data = await fetchMailOps<{ ok: boolean; total: number; emails: Email[] }>(
+    '', params
+  );
+  return data.emails || [];
+}
+
+// Obtener estadísticas del dashboard
+export async function getStats(): Promise<MailOpsStats> {
+  return fetchMailOps<MailOpsStats>('/stats');
+}
+
+// Obtener detalle de un correo específico
+export async function getEmailById(id: string): Promise<Email | null> {
+  try {
+    const data = await fetchMailOps<{ ok: boolean; email: Email }>('', { id });
+    return data.email || null;
+  } catch {
+    return null;
+  }
+}
+
+// =============================================================================
+// DATOS ESTÁTICOS DEL SIDEBAR
+// (Estos sí pueden ser estáticos — o también podrían venir de la API)
+// =============================================================================
 
 export const mailAccounts: MailAccount[] = [
-  { email: 'ops@balilogistica.mx', count: 24 },
-  { email: 'alertas@balilogistica.mx', count: 8 },
-  { email: 'carriers@balilogistica.mx', count: 5 },
+  { email: 'dispatch@bali.mx',  count: 17 },
+  { email: 'billing@bali.mx',   count:  5 },
+  { email: 'docs@bali.mx',      count:  8 },
+  { email: 'support@bali.mx',   count:  3 },
+  { email: 'alerts@bali.mx',    count:  7 },
 ];
 
-export const mailFolders: MailFolder[] = [
-  { name: 'Entrada', count: 37 },
-  { name: 'Procesados', count: 128 },
-  { name: 'Pendientes', count: 12 },
-  { name: 'Alertas', count: 4 },
+// Las carpetas se calcularán dinámicamente en el componente
+export function buildFolders(emails: Email[]): MailFolder[] {
+  return [
+    { name: 'Entrada',    count: emails.length },
+    { name: 'Procesados', count: emails.filter(e => e.pipeline_status === 'COMPLETED' || e.status === 'Procesado').length },
+    { name: 'Pendientes', count: emails.filter(e => e.requiere_humano).length },
+    { name: 'Alertas',    count: emails.filter(e => e.hay_holds).length },
+    { name: 'Nuevos pat.', count: emails.filter(e => e.es_patron_nuevo).length },
+  ];
+}
+
+// Las vistas IA se calculan dinámicamente
+export function buildViews(emails: Email[]): MailView[] {
+  return [
+    { name: 'Holds activos',   count: emails.filter(e => e.hay_holds).length },
+    { name: 'OCEAN',           count: emails.filter(e => e.opType === 'OCEAN').length },
+    { name: 'RAIL',            count: emails.filter(e => e.opType === 'RAIL').length },
+    { name: 'OTR',             count: emails.filter(e => e.opType === 'OTR').length },
+    { name: 'Aprobación',      count: emails.filter(e => e.requiere_humano).length },
+    { name: 'Reenvíos',        count: emails.filter(e => e.es_reenvio).length },
+  ];
+}
+
+// Pipeline de agentes — estático con estado visual
+export const agentPipeline = [
+  { name: 'Lector',       code: 'A1', color: '#059669', status: 'live'   as const },
+  { name: 'Clasificador', code: 'A2', color: '#4F46E5', status: 'live'   as const },
+  { name: 'Extractor',    code: 'A3', color: '#0891B2', status: 'live'   as const },
+  { name: 'Relación',     code: 'A4', color: '#7C3AED', status: 'idle'   as const },
+  { name: 'Acción',       code: 'A5', color: '#DC2626', status: 'idle'   as const },
+  { name: 'Ejecutor',     code: 'A6', color: '#6B7280', status: 'idle'   as const },
 ];
 
-export const mailViews = [
-  { name: 'Alta prioridad', count: 7 },
-  { name: 'Aprobación req.', count: 5 },
-  { name: 'Archivos', count: 42 },
-];
+// Colores por tipo de operación
+export const opColors: Record<string, string> = {
+  OCEAN: '#059669',
+  RAIL:  '#DC2626',
+  OTR:   '#7C3AED',
+  INT:   '#0891B2',
+  GT:    '#0891B2',
+  DET:   '#6B7280',
+};
 
-export const agentPipeline: MailAgentPipeline[] = [
-  { name: 'Lector IA', status: 'live', color: '#4F46E5' },
-  { name: 'Clasificador', status: 'live', color: '#059669' },
-  { name: 'Extractor', status: 'live', color: '#0891B2' },
-  { name: 'Relacional', status: 'idle', color: '#D97706' },
-  { name: 'Acción', status: 'idle', color: '#EA580C' },
-  { name: 'Ejecutor N1', status: 'idle', color: '#7C3AED' },
-];
+// =============================================================================
+// REACT HOOK — useMailOps
+// Para usar en el componente con estado, loading y refresh
+// =============================================================================
 
-export const emails: Email[] = [
-  {
-    id: 'MB-001',
-    sender: 'MSC México',
-    senderCode: 'OCEN',
-    opType: 'OCEN',
-    subject: 'BL-2401 Confirmación embarque MANZANILLO-SHANGHAI',
-    description: 'Confirmación de embarque marítimo con documentación completa',
-    priority: 'alta',
-    pipeline: 'Clasificación Automática',
-    status: 'Clasificado',
-    type: 'B/L Request',
-    entity: 'BL / SC-4421',
-    tags: ['BL', 'GM'],
-    timestamp: '15 ene, 08:14 a.m.',
-    preview: 'Adjuntamos confirmación de embarque BL-2401 para la ruta Manzanillo-Shanghai. Documentación completa lista para revisión.',
-    classified: true,
-    aiAnalysis: 'AT Analysis — Confirma: MSC México confirma embarque BL-2401 ruta Manzanillo-Shanghai. Documentación completa disponible en portal.',
-    detectedEntities: [{ label: 'BL', value: 'BL-2401' }, { label: 'Ruta', value: 'MZT-SHA' }],
-    confirmedBy: 'J. Rodríguez',
-  },
-  {
-    id: 'MB-002',
-    sender: 'Ferromex',
-    senderCode: 'Rail',
-    opType: 'Rail',
-    subject: 'WB-089 Solicitud de recibo de carga Guadalajara-CDMX',
-    description: 'Solicitud de recibo de carga ferroviaria',
-    priority: 'crítica',
-    pipeline: 'Escalamiento',
-    status: 'Pendiente',
-    type: 'Rev$11',
-    entity: 'Factura / BL-6',
-    tags: ['WB', 'FC'],
-    timestamp: '15 ene, 09:02 a.m.',
-    preview: 'Solicitamos recibo de carga para el envío WB-089 en la ruta Guadalajara-CDMX. Requiere revisión urgente.',
-    classified: true,
-    aiAnalysis: 'AT Analysis — Alerta: Ferromex solicita recibo de carga WB-089. Prioridad alta por vencimiento de ventana.',
-    detectedEntities: [{ label: 'WB', value: 'WB-089' }, { label: 'Ruta', value: 'GDL-CDMX' }],
-    confirmedBy: '',
-  },
-  {
-    id: 'MB-003',
-    sender: 'DHL Express',
-    senderCode: 'OTR',
-    opType: 'OTR',
-    subject: 'POD-3312 Prueba de entrega MONTERREY confirmada',
-    description: 'Prueba de entrega confirmada con firma digital',
-    priority: 'media',
-    pipeline: 'Clasificación Automática',
-    status: 'Procesado',
-    type: 'POD',
-    entity: 'BL / OT-3312',
-    tags: ['POD', 'ENT'],
-    timestamp: '15 ene, 09:45 a.m.',
-    preview: 'DHL Express confirma entrega exitosa de 3 pallets en almacén Monterrey Norte. POD firmado por Javier Rodríguez.',
-    classified: true,
-    aiAnalysis: 'AT Analysis — Confirma: DHL Express confirma entrega exitosa de 3 pallets en almacén Monterrey Norte. POD firmado.',
-    detectedEntities: [{ label: 'DR. Factura', value: 'OT-3312' }, { label: 'Punto', value: 'MTY Norte' }],
-    confirmedBy: 'J. Rodríguez',
-  },
-  {
-    id: 'MB-004',
-    sender: 'Equipo Ops',
-    senderCode: 'DET',
-    opType: 'DET',
-    subject: 'Reunión de coordinación semanal — Agenda y KPIs',
-    description: 'Agenda de reunión semanal con KPIs operativos',
-    priority: 'baja',
-    pipeline: 'Archivo',
-    status: 'Interno',
-    type: 'Interna',
-    entity: 'BALI / INT-Ops',
-    tags: ['INT', 'KPI'],
-    timestamp: '15 ene, 10:30 a.m.',
-    preview: 'Adjuntamos agenda para la reunión de coordinación semanal. Incluye revisión de KPIs y seguimiento de pendientes.',
-    classified: true,
-    aiAnalysis: 'AT Analysis — Interno: Correo de coordinación semanal del equipo de operaciones. Sin acción requerida.',
-    detectedEntities: [{ label: 'Tipo', value: 'Interno' }, { label: 'Área', value: 'Operaciones' }],
-    confirmedBy: '',
-  },
-];
+// Nota: Este hook requiere React. Copiar en un archivo separado
+// src/hooks/useMailOps.ts si el proyecto usa hooks personalizados.
+
+/*
+import { useState, useEffect, useCallback } from 'react';
+
+export function useMailOps(filters?: MailOpsFilters) {
+  const [emails,  setEmails]  = useState<Email[]>([]);
+  const [stats,   setStats]   = useState<MailOpsStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [emailData, statsData] = await Promise.all([
+        getEmails(filters),
+        getStats(),
+      ]);
+      setEmails(emailData);
+      setStats(statsData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error cargando datos');
+    } finally {
+      setLoading(false);
+    }
+  }, [JSON.stringify(filters)]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh cada 30 segundos
+  useEffect(() => {
+    const interval = setInterval(load, 30_000);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  return { emails, stats, loading, error, refresh: load };
+}
+*/
