@@ -274,8 +274,9 @@ export default function MailOpsModule({ onBack }: MailOpsModuleProps) {
         <div className="flex-1 bg-white rounded-xl border border-gray-100 overflow-hidden flex flex-col min-w-0">
 
           {/* Header de la tabla */}
-          <div className="grid grid-cols-[32px_56px_1fr_88px_72px_1.5fr_88px_64px_72px_36px] gap-1 px-3 py-2 border-b border-gray-200 bg-gray-50 text-[10px] font-semibold text-gray-400 uppercase tracking-wide items-center">
+          <div className="grid grid-cols-[32px_72px_56px_1fr_88px_72px_1.5fr_88px_64px_72px_36px] gap-1 px-3 py-2 border-b border-gray-200 bg-gray-50 text-[10px] font-semibold text-gray-400 uppercase tracking-wide items-center">
             <span></span>
+            <span>Recibido</span>
             <span>Op</span>
             <span>Remitente</span>
             <span>Estado</span>
@@ -304,7 +305,7 @@ export default function MailOpsModule({ onBack }: MailOpsModuleProps) {
                 return (
                   <button key={email.id} type="button"
                     onClick={() => setSelectedId(email.id)}
-                    className={`w-full text-left grid grid-cols-[32px_56px_1fr_88px_72px_1.5fr_88px_64px_72px_36px] gap-1 px-3 py-2.5 border-b border-gray-100 items-center transition-colors ${
+                    className={`w-full text-left grid grid-cols-[32px_72px_56px_1fr_88px_72px_1.5fr_88px_64px_72px_36px] gap-1 px-3 py-2.5 border-b border-gray-100 items-center transition-colors ${
                       isSelected
                         ? 'bg-indigo-50 border-l-2 border-l-indigo-500'
                         : 'hover:bg-gray-50'
@@ -314,6 +315,9 @@ export default function MailOpsModule({ onBack }: MailOpsModuleProps) {
                     <input type="checkbox" aria-label={`Seleccionar ${email.sender}`}
                       className="w-3.5 h-3.5 rounded border-gray-300"
                       onClick={e => e.stopPropagation()} />
+
+                    {/* Recibido */}
+                    <span className="text-[10px] text-gray-400">{email.timestamp_iso ? new Date(email.timestamp_iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) + ' ' + new Date(email.timestamp_iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''}</span>
 
                     {/* Op badge */}
                     <div className="w-8 h-6 rounded flex items-center justify-center text-white text-[8px] font-bold"
